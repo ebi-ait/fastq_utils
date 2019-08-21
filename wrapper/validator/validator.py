@@ -15,7 +15,7 @@ class Validator:
                 if "ERROR" in line:
                     report.log_error(line.rstrip())
         except (TypeError, ValueError, Exception) as e:
-            report.log_error(e)
+            report.log_error(str(e))
 
         report.state = "INVALID" if report.errors else "VALID"
 
