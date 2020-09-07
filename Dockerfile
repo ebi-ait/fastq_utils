@@ -1,4 +1,4 @@
-FROM humancellatlas/upload-validator-base-alpine:22
+FROM quay.io/ebi-ait/upload-validator-base-alpine:23
 
 LABEL maintainer="nuno.fonseca at gmail.com"
 
