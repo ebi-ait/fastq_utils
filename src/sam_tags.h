@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2017,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2017-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 # This file is part of fastq_utils.
 #
@@ -31,14 +31,24 @@
 #define CELL_TAG "CR" 
 #define CELL_QUAL_TAG "CY" 
 
-#define UMI_TAG "QX" 
-#define UMI_QUAL_TAG "OQ" 
+// SAM specification
+#define UMI_TAG "RX" 
+#define UMI_QUAL_TAG "QX"
+
+// used by 10x: '[[https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/output/bam
+#define UMI_TAG_10X "UB" 
+#define UMI_TAG_QUAL_10X "UY" 
+
+short __10x_compat=0;
+#define GET_UMI_TAG ((__10x_compat==0)?UMI_TAG:UMI_TAG_10X)
+#define GET_UMI_QUAL_TAG ((__10x_compat==0)?UMI_QUAL_TAG:UMI_TAG_QUAL_10X)
 
 #define SAMPLE_TAG "BC"
 #define SAMPLE_QUAL_TAG  "QT"
 
 #define ORIG_RN_TAG "on"
 #define ORIG_QUAL_TAG "op" 
+
 
 // break spec to keep compatibility with some tools
 #define GENE_ID_TAG "GX"

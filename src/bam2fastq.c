@@ -1,6 +1,6 @@
 /*
  * =========================================================
- * Copyright 2017,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+ * Copyright 2017-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
  *
  *
  * This is free software: you can redistribute it and/or modify
@@ -38,7 +38,8 @@
 
 
 #define BUF_SIZE 10000
-typedef enum { R1=0,R2=1,CELL=2,SAMPLE=3,UMI=4} FILE_LOC;
+typedef enum { R1=0,R2=1,CELL=2,SAMPLE=3,UMI=4,SE=5} FILE_LOC;
+
 
 char EMPTY_STRING[1]="\0";
 
@@ -53,16 +54,18 @@ char *get_tag(bam1_t *aln,const char tagname[2]) {
   return(s2);
 }
 
-void QWRITE(gzFile fd,FILE_LOC type, char*s1,char*s2,char*s3) {
-  char rn_suf[3]="";
-  sprintf(&rn_suf[0],"/%d",(int)type+1);
+void QWRITE(gzFile fd,FILE_LOC type, char*s1,char*s2,char*s3,int add_suffix) {
+  char rn_suf[4]="";
+  if (add_suffix) // add a suffix
+    sprintf(&rn_suf[0],"/%u",(short)type+1);
   GZ_WRITE(fd,"@");
   GZ_WRITE(fd,s1);
   GZ_WRITE(fd,rn_suf);
   GZ_WRITE(fd,"\n");
   GZ_WRITE(fd,s2);
   GZ_WRITE(fd,"\n+\n");
-  GZ_WRITE(fd,s3);
+  if (s3!=NULL)
+    GZ_WRITE(fd,s3);
   GZ_WRITE(fd,"\n");
 }
 
@@ -71,14 +74,14 @@ gzFile get_fp(gzFile *fps, FILE_LOC type, const char *file_prefix) {
   if ( fps[type]==NULL ) {
     // open file
     char buf[BUF_SIZE];
-    char *ext[]={"_1","_2","_cell","_sample","_umi"};
+    char *ext[]={"_1","_2","_cell","_sample","_umi",""};
     sprintf(buf,"%s%s.fastq.gz",file_prefix,ext[type]);
-    fprintf(stderr,"opening %s\n",buf);
     fps[type]=fastq_open(buf,"wb");
+    fprintf(stderr,"opening %s\n",buf);
   }
   return(fps[type]);
 }
-
+/*
 char* restore_read_name(char *s) {
   unsigned int i=0;
   while ( s[i]!='\0' ) {
@@ -87,7 +90,7 @@ char* restore_read_name(char *s) {
   }
   return(s);
 }
-
+*/
 char* my_get_seq(bam1_t *aln, char *buf) {
   unsigned int i,len = aln->core.l_qseq;
   uint8_t *seq = bam1_seq(aln);
@@ -109,7 +112,7 @@ char* get_qual(bam1_t *aln,char *buf) {
 
 
 void print_usage(int exit_status) {
-    PRINT_ERROR("Usage: bam2fastq --bam in.bam --out fastq_prefix");
+    PRINT_ERROR("Usage: bam2fastq --bam in.bam --out fastq_prefix [--verbose --10x|-X]");
     if ( exit_status>=0) exit(exit_status);
 }
 
@@ -120,6 +123,7 @@ int main(int argc, char *argv[])
   char *bam_file=NULL;
   char *out_file_prefix=NULL;
   int i;
+
   static int verbose=0;  
   static int help=FALSE;
   static struct option long_options[] = {
@@ -127,6 +131,7 @@ int main(int argc, char *argv[])
     {"help",   no_argument, &help, TRUE},
     {"bam",  required_argument, 0, 'b'},
     {"out",  required_argument, 0, 'o'},
+    {"10x",  no_argument, (int*)&__10x_compat,1},
     {0,0,0,0}
   };
   
@@ -136,17 +141,23 @@ int main(int argc, char *argv[])
     /* getopt_long stores the option index here. */
     int option_index = 0;
     
-    int c = getopt_long (argc, argv, "b:o:h",
+    int c = getopt_long (argc, argv, "b:o:hX",
 			 long_options, &option_index);      
     if (c == -1) // no more options
       break;
     
-    switch (c) {      
+    switch (c) {
+    case 'X':
+      __10x_compat=1;
+      break;
     case 'b':
       bam_file=optarg;
       break;
     case 'o':
       out_file_prefix=optarg;
+      break;
+    case 'h':
+      help=TRUE;
       break;
     default:
       //print_usage(1);
@@ -167,7 +178,7 @@ int main(int argc, char *argv[])
     return(PARAMS_ERROR_EXIT_STATUS);  
   }  
   
-  gzFile fd[5]={NULL,NULL,NULL,NULL,NULL};
+  gzFile fd[6]={NULL,NULL,NULL,NULL,NULL,NULL};
   
   //
   // 
@@ -178,6 +189,7 @@ int main(int argc, char *argv[])
   
   // tmp buffers
   char seq_buf[BUF_SIZE];
+  char qual_buf[BUF_SIZE];
 
   
   //
@@ -192,40 +204,75 @@ int main(int argc, char *argv[])
      
      ++num_alns;
      if (num_alns%100000==0) { fprintf(stderr,"\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b%llu",num_alns); fflush(stderr); }
-     
-     // TODO: add checks?
-     if ( is_pe == -1 ) {
-       if (aln->core.flag == BAM_FUNMAP ) {  // SE
-	 is_pe=FALSE;
-       } else { // PE
-	 is_pe=TRUE;
-	 assert(aln->core.flag==(BAM_FUNMAP|BAM_FMUNMAP|BAM_FPAIRED|BAM_FREAD1));
-       }
+
+     // exclude non-primary alignments
+     if ( aln->core.flag & BAM_FSECONDARY) {
+       //fprintf(stderr,"Skipping...\n");
+       continue;
      }
      // read/qual (se/pe/first/second)
-     // char *hdr=restore_read_name(get_tag(aln,ORIG_RN_TAG));x
      char *hdr=get_tag(aln,ORIG_RN_TAG);
      char *seq=my_get_seq(aln,&seq_buf[0]);
      char *qual=get_tag(aln,ORIG_QUAL_TAG);
+     if ( hdr==NULL ) {
+       // ORIG_RN_TAG missing
+       // BAM was not generated with fastq2bam
+       char *hdr=bam1_qname(aln);
+       qual=get_qual(aln,&qual_buf[0]);
+       if ( qual == NULL ) {
+	 // create a dummy sequence to ensure that the fastq file is valid
+	 unsigned int i,len = aln->core.l_qseq;
+	 for (i = 0; i < len; ++i)
+	   qual_buf[i] =  'H';
+	 qual_buf[len]='\0';
+	 qual=&qual_buf[0];
+       }
+       // 
+       if (aln->core.flag & BAM_FPAIRED ) {  // SE
+	 is_pe=TRUE;
+       } else { // PE
+	 is_pe=FALSE;
+       }
+       short write_to=R2;       
+       if ( ! is_pe ) {
+	 write_to=SE;
+       } else if ( (aln->core.flag==(BAM_FUNMAP|BAM_FMUNMAP|BAM_FPAIRED|BAM_FREAD1)) || aln->core.flag & BAM_FUNMAP )  {
+	 write_to=R1;
+       } 
+       QWRITE(get_fp(fd, write_to , out_file_prefix),write_to, hdr,seq,qual,TRUE);
+     } else {
+       // bam generated by fastq2bam 
+       // TODO: add checks?
 
-     if ( (aln->core.flag==(BAM_FUNMAP|BAM_FMUNMAP|BAM_FPAIRED|BAM_FREAD1)) || aln->core.flag==BAM_FUNMAP )  {
-       // read1
-       QWRITE(get_fp(fd, R1 , out_file_prefix),R1, hdr,seq,qual);
-       // cell
-       if (get_tag(aln,CELL_TAG)!=NULL)
-	 QWRITE(get_fp(fd, CELL, out_file_prefix),CELL, hdr,get_tag(aln,CELL_TAG),get_tag(aln,CELL_QUAL_TAG));
-       // umi
-       if (get_tag(aln,UMI_TAG)!=NULL)
-	 QWRITE(get_fp(fd, UMI, out_file_prefix),UMI,hdr,get_tag(aln,UMI_TAG),get_tag(aln,UMI_QUAL_TAG));
-       // sample
-       if (get_tag(aln,SAMPLE_TAG)!=NULL)
-	 QWRITE(get_fp(fd, SAMPLE, out_file_prefix),SAMPLE,hdr,get_tag(aln,SAMPLE_TAG),get_tag(aln,SAMPLE_QUAL_TAG));
-     } else { //R2
-       QWRITE(get_fp(fd, R2 , out_file_prefix),R2,hdr,seq,qual);
-     } 
+       is_pe=FALSE;
+       if (aln->core.flag & BAM_FPAIRED ) {
+	 is_pe=TRUE;
+       }
+
+       if (  !is_pe  ||
+	    (aln->core.flag & BAM_FREAD1 ) ) {
+	 // 
+	 short write_to=R1;       
+	 if ( ! is_pe )
+	   write_to=SE;
+
+	 QWRITE(get_fp(fd, write_to , out_file_prefix),R1, hdr,seq,qual,FALSE);
+	 // cell
+	 if (get_tag(aln,CELL_TAG)!=NULL)
+	   QWRITE(get_fp(fd, CELL, out_file_prefix),CELL, hdr,get_tag(aln,CELL_TAG),get_tag(aln,CELL_QUAL_TAG),FALSE);
+	 // umi
+	 if (get_tag(aln,GET_UMI_TAG)!=NULL)
+	   QWRITE(get_fp(fd, UMI, out_file_prefix),UMI,hdr,get_tag(aln,GET_UMI_TAG),get_tag(aln,GET_UMI_QUAL_TAG),FALSE);
+	 // sample
+	 if (get_tag(aln,SAMPLE_TAG)!=NULL)
+	   QWRITE(get_fp(fd, SAMPLE, out_file_prefix),SAMPLE,hdr,get_tag(aln,SAMPLE_TAG),get_tag(aln,SAMPLE_QUAL_TAG),FALSE);
+       } else { //R2
+	 QWRITE(get_fp(fd, R2 , out_file_prefix),R2,hdr,seq,qual,FALSE);
+       }
+     }
   }
   // TODO: catch errors
-  for (i=0;i<=4;i++)
+  for (i=0;i<=5;i++)
     if (fd[i]!=NULL) gzclose(fd[i]);
   
   fprintf(stderr,"\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\n");fflush(stderr);

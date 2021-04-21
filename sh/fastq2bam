@@ -1,11 +1,12 @@
 #!/bin/bash
 # wrapper to fastq_pre_barcodes
 # Generates a BAM file with unaligned reads and all barcodes preprocessed
-VERSION="0.16.0""0.15.1"
+VERSION="0.24.1"
 
 command -v fastq_pre_barcodes   >/dev/null 2>&1 || { echo "ERROR: fastq_utils does not seem to be installed - fastq_pre_barcodes not found.  Aborting." >&2; exit 1; }
 command -v samtools   >/dev/null 2>&1 || { echo "ERROR: fastq_utils does not seem to be installed - samtools not found.  Aborting." >&2; exit 1; }
 
+set -e
 ##########################################################
 #
 function pinfo {
@@ -17,9 +18,17 @@ function perror {
 }
 
 function usage() {
-    echo "fastq2bam $VERSION="0.16.0""0.15.1""
+    echo "fastq2bam VERSION=$VERSION"
     echo "Usage: fastq2bam -s schema -b out_bam -1 fastqfile1 [ -2 fastqfile2 -3 fastqfile3 -4 fastqfile4]"
-    echo "barcode schema: 10xV1 10xV1i 10xV1a 10xV2 drop-seq none"
+    echo "barcode schema: 10xV1 10xV1i 10xV1a 10xV2 10xV3 drop-seq none"
+    echo "10xV1 10xV1i 10xV1a 10xV2 10xV3 and drop-seq schemas may be customised through the following paramaters:"
+    echo " -c int : cell barcode offset"
+    echo " -C int : cell barcode size"
+    echo " -u int : UMI barcode offset"
+    echo " -U int : UMI barcode size"
+    echo " -z int : sample barcode offset"
+    echo " -Z int : sample barcode size"
+    echo " -X : use 10x UMI tags instead of tags defined in the SAM specification"
 }
 
 function gen_bam() {
@@ -28,8 +37,23 @@ function gen_bam() {
     cmd="$cmd --sam --outfile1 - | samtools view -b - > $bam_file.tmp && mv $bam_file.tmp $bam_file"
     echo $cmd
     bash -c "set -eo pipefail; $cmd"
+    set -e
+    ## bam should not be empty
+    if [ "-$(samtools view -c $bam_file)" == "-0" ]; then
+	perror "All reads discarded - please check the warnings"
+	rm -f $bam_file
+	exit 1
+    fi
+
 }
 
+function set_default_value {
+    var=$1
+    default_value=$2
+    if [ "${!var}-" == "-" ]; then
+	eval $var=$default_value
+    fi
+}
 ##########################################################
 ##
 schema=
@@ -38,10 +62,18 @@ fastq_file1=
 fastq_file2=
 fastq_file3=
 fastq_file4=
+cell_barcode_offset=
+cell_barcode_size=
+umi_barcode_offset=
+umi_barcode_size=
+sample_barcode_offset=
+sample_barcode_size=
+_10x_compat=
 
-while getopts "b:s:a:1:2:3:4:h"  Option
+while getopts "s:z:Z:c:C:u:U:b:s:a:1:2:3:4:hX"  Option
 do
     case $Option in
+        X ) _10x_compat="--10x";;
         b ) bam_file=$OPTARG;;
 	s ) schema=$OPTARG;;
 	a ) schema=$OPTARG;;
@@ -49,7 +81,14 @@ do
 	2 ) fastq_file2=$OPTARG;;
 	3 ) fastq_file3=$OPTARG;;
 	4 ) fastq_file4=$OPTARG;;
+	c ) cell_barcode_offset=$OPTARG;;
+	C ) cell_barcode_size=$OPTARG;;
+	u ) umi_barcode_offset=$OPTARG;;
+	U ) umi_barcode_size=$OPTARG;;
+	z ) sample_barcode_offset=$OPTARG;;
+	Z ) sample_barcode_size=$OPTARG;;
         h ) usage; exit 0;;
+	\?) exit 1;;
     esac
 done
 
@@ -83,13 +122,45 @@ if [ "$schema-"  == "10xV2-" ]; then
 	usage
 	exit 1
     fi
-    cmd="fastq_pre_barcodes --read1 $fastq_file2 --index1 $fastq_file1 --umi_read index1 --umi_offset 16 --umi_size 10 --cell_read index1 --cell_offset 0 --cell_size 16"
+    set_default_value "umi_barcode_offset" 16
+    set_default_value "umi_barcode_size" 10
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 16
+
+    cmd="fastq_pre_barcodes --read1 $fastq_file2 --index1 $fastq_file1 --umi_read index1 --umi_offset $umi_barcode_offset --umi_size $umi_barcode_size --cell_read index1 --cell_offset $cell_barcode_offset --cell_size $cell_barcode_size  $_10x_compat"
     if [ "$fastq_file3-" != "-" ]; then
-	cmd="$cmd --index2 $fastq_file3 --sample_read index2 --sample_offset 0 --sample_size 8" 
+	set_default_value "sample_barcode_offset" 0
+	set_default_value "sample_barcode_size" 8
+	cmd="$cmd --index2 $fastq_file3 --sample_read index2 --sample_offset $sample_barcode_offset --sample_size $sample_barcode_size" 
     fi
     gen_bam $cmd
     exit 0
 fi
+
+if [ "$schema-"  == "10xV3-" ]; then
+    # index1=R1 file index2=I1 reads=R2
+    if [ "$fastq_file2-"  == "-" ]; then
+	echo "Missing files for $schema:"
+	echo "-1 cell#16|umi#12 -2 cdna -3 [-3 sample#8]"
+	echo "e.g., -1 *R1*.fastq.gz -2 *R2*.fastq.gz [-3 *I1*.fastq.gz]"
+	usage
+	exit 1
+    fi
+    set_default_value "umi_barcode_offset" 16
+    set_default_value "umi_barcode_size" 12
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 16
+
+    cmd="fastq_pre_barcodes --read1 $fastq_file2 --index1 $fastq_file1 --umi_read index1 --umi_offset $umi_barcode_offset --umi_size $umi_barcode_size --cell_read index1 --cell_offset $cell_barcode_offset --cell_size $cell_barcode_size  $_10x_compat"
+    if [ "$fastq_file3-" != "-" ]; then
+	set_default_value "sample_barcode_offset" 0
+	set_default_value "sample_barcode_size" 8
+	cmd="$cmd --index2 $fastq_file3 --sample_read index2 --sample_offset $sample_barcode_offset --sample_size $sample_barcode_size" 
+    fi
+    gen_bam $cmd
+    exit 0
+fi
+
 
 if [ "$schema-"  == "10xV1-" ]; then
     # index1=read2/I7, index2=I5
@@ -100,9 +171,16 @@ if [ "$schema-"  == "10xV1-" ]; then
 	usage
 	exit 1
     fi
-    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index1 $fastq_file2 --index1 $fastq_file2 --umi_read index1 --umi_offset 14 --umi_size 10 --cell_read index1 --cell_offset 0 --cell_size 14"
+    set_default_value "umi_barcode_offset" 14
+    set_default_value "umi_barcode_size" 10
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 14
+
+    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index1 $fastq_file2 --index1 $fastq_file2 --umi_read index1 --umi_offset $umi_barcode_offset --umi_size $umi_barcode_size --cell_read index1 --cell_offset $cell_barcode_offset --cell_size $cell_barcode_size  $_10x_compat"
     if [ "$fastq_file3-" != "-" ]; then
-	cmd="$cmd  --index2 $fastq_file2 --sample_read index2 --sample_offset 0 --sample_size 8" 
+	set_default_value "sample_barcode_offset" 0
+	set_default_value "sample_barcode_size" 8
+	cmd="$cmd  --index2 $fastq_file2 --sample_read index2 --sample_offset $sample_barcode_offset --sample_size $sample_barcode_size" 
     fi
     gen_bam $cmd
     exit 0
@@ -121,10 +199,16 @@ if [ "$schema-"  == "10xV1a-" ]; then
 	usage
 	exit 1
     fi
+    set_default_value "umi_barcode_offset" 0
+    set_default_value "umi_barcode_size" 10
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 14
 
-    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index3 $fastq_file2 --index1 $fastq_file3 --umi_read index3 --umi_offset 0 --umi_size 10 --cell_read index1 --cell_offset 0 --cell_size 14"
+    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index2 $fastq_file2 --index1 $fastq_file3 --umi_read index2 --umi_offset  $umi_barcode_offset --umi_size  $umi_barcode_size --cell_read index1 --cell_offset  $cell_barcode_offset --cell_size $cell_barcode_size  $_10x_compat"
     if [ "$fastq_file4-"  != "-" ]; then
-	cmd="$cmd  --index3 $fastq_file4 --sample_read index2 --sample_offset 0 --sample_size 8"
+	set_default_value "sample_barcode_offset" 0
+	set_default_value "sample_barcode_size" 8
+	cmd="$cmd  --index3 $fastq_file4 --sample_read index3 --sample_offset $sample_barcode_offset --sample_size $sample_barcode_size"
     fi
     gen_bam $cmd
     exit 0
@@ -141,17 +225,23 @@ if [ "$schema-"  == "10xV1i-" ]; then
 	usage
 	exit 1
     fi
+    set_default_value "umi_barcode_offset" 0
+    set_default_value "umi_barcode_size" 10
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 14
 
-    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index3 $fastq_file1 --index1 $fastq_file2 --umi_read index3 --umi_offset 0 --umi_size 10 --cell_read index1 --cell_offset 0 --cell_size 14 --interleaved read1,index3"
+    cmd="fastq_pre_barcodes --read1 $fastq_file1 --index3 $fastq_file1 --index1 $fastq_file2 --umi_read index3 --umi_offset $umi_barcode_offset --umi_size $umi_barcode_size --cell_read index1 --cell_offset $cell_barcode_offset --cell_size $cell_barcode_size --interleaved read1,index3  $_10x_compat"
     if [ "$fastq_file3-"  != "-" ]; then
-	cmd="$cmd  --index2 $fastq_file3 --sample_read index2 --sample_offset 0 --sample_size 8"
+	set_default_value "sample_barcode_offset" 0
+	set_default_value "sample_barcode_size" 8
+	cmd="$cmd  --index2 $fastq_file3 --sample_read index2 --sample_offset $sample_barcode_offset --sample_size $sample_barcode_size"
     fi
     gen_bam $cmd
     exit 0
 fi
 
 
-if [ "$schema-"  == "dropseq-" ]; then
+if [ "$schema-"  == "drop-seq-" ]; then
     pinfo "schema $schema under development"
     if [ "$fastq_file2-"  == "-" ]; then
 	echo "Missing files for $schema:"
@@ -160,7 +250,14 @@ if [ "$schema-"  == "dropseq-" ]; then
 	usage
 	exit 1
     fi
-    cmd="fastq_pre_barcodes --read1 $fastq_file2 --index1 $fastq_file1 --umi_read index1 --umi_offset 12 --umi_size 8 --cell_read index1 --cell_offset 0 --cell_size 12"
+    # fastq_file1 = cell(12) umi(8)
+    # fastq_file2 = cdna
+    set_default_value "umi_barcode_offset" 12
+    set_default_value "umi_barcode_size" 8
+    set_default_value "cell_barcode_offset" 0
+    set_default_value "cell_barcode_size" 12
+
+    cmd="fastq_pre_barcodes --read1 $fastq_file2 --index1 $fastq_file1 --umi_read index1 --umi_offset $umi_barcode_offset --umi_size $umi_barcode_size --cell_read index1 --cell_offset  $cell_barcode_offset --cell_size $cell_barcode_size  $_10x_compat"
     gen_bam $cmd
 
     exit 0

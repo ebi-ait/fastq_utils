@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2012-2018,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2012-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 # This file is part of fastq_utils.
 #
@@ -20,7 +20,7 @@
 #
 # =========================================================
 */
-#define VERSION "0.16.0"
+#define VERSION "0.24.1"
 
 #define DEFAULT  0
 #define CASAVA18 1
@@ -29,7 +29,7 @@
 
 #ifndef MAX_READ_LENGTH
 // 500000 bases should cover most of the cases for now :)
-#define MAX_READ_LENGTH 500000
+#define MAX_READ_LENGTH 2500000
 #endif
 
 #ifndef MAX_LABEL_LENGTH
@@ -43,14 +43,19 @@
 #define MAX_BARCODE_LENGTH 50
 #define MIN_READ_LENGTH 1
 #define UNDEF -1
+#define MAX_PHRED_QUAL 126
 
 typedef enum  { COLORSPACE=1, SEQSPACE=0, UNDEFSPACE=-1 } READ_SPACE;
 typedef enum  { TRUE=1, FALSE=0 } FASTQ_BOOLEAN;
+#ifndef TRUE
+#define TRUE 1
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
 typedef long FASTQ_READ_OFFSET;
 
-#ifndef HASHSIZE
-#define HASHSIZE 39000001
-#endif
+#define DEFAULT_HASHSIZE 39000001
 
 #include "hash.h"
 #include <zlib.h> 
@@ -144,7 +149,7 @@ void fastq_index_readnames(FASTQ_FILE *,hashtable,long long,int);
 void fastq_write_entry(FASTQ_FILE* fd,FASTQ_ENTRY *e);
 void fastq_write_entry2stdout(FASTQ_ENTRY *e);
 void fastq_seek_copy_read(long offset,FASTQ_FILE* from,FASTQ_FILE *to);
-char* fastq_qualRange2enc(int min_qual,int max_qual);
+char* fastq_qualRange2enc(unsigned int min_qual,unsigned int max_qual);
 void fastq_rewind(FASTQ_FILE* fd);
 
 void fastq_quick_copy_entry(long offset,FASTQ_FILE* from,FASTQ_FILE* to);

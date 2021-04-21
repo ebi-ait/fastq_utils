@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2012-2018,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2012-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 # This file is part of fastq_utils.
 #
@@ -177,10 +177,12 @@ FASTQ_FILE* validate_single_fastq_file(char *f) {
 
 void print_usage(int verbose_usage) {
 
-  printf("Usage: fastq_info [-r -s -h] fastq1 [fastq2 file|pe]\n");
+  printf("Usage: fastq_info [-r -e -s -q -h] fastq1 [fastq2 file|pe]\n");
   if ( verbose_usage ) {
     printf(" -h  : print this help message\n");
     printf(" -s  : the reads in the two fastq files have the same ordering\n");
+    printf(" -e  : do not fail with empty files\n");
+    printf(" -q  : do not fail if quality encoding cannot be determined\n");
     printf(" -r  : skip check for duplicated readnames\n");
   }
 }
@@ -198,6 +200,8 @@ int main(int argc, char **argv ) {
   int is_paired_data=FALSE;
   int is_interleaved=FALSE;
   int is_sorted=FALSE;
+  int empty_ok=FALSE;
+  int no_encoding_ok=FALSE;
   int skip_readname_check=FALSE;
   //int fix_dot=FALSE;
   
@@ -207,9 +211,17 @@ int main(int argc, char **argv ) {
 
   fastq_print_version();
   
-  while ((c = getopt (argc, argv, "sfrh")) != -1)
+  while ((c = getopt (argc, argv, "esfrhq")) != -1)
     switch (c)
       {
+      case 'q':
+	no_encoding_ok=TRUE;
+	++nopt;
+	break;
+      case 'e':
+	empty_ok=TRUE;
+	++nopt;
+	break;
       case 's':
 	is_sorted=TRUE;
 	++nopt;
@@ -276,8 +288,8 @@ int main(int argc, char **argv ) {
     // single or pair of fastq file(s)
     fd1=fastq_new(argv[1+nopt],FALSE,"r");
     if ( is_paired_data) fastq_is_pe(fd1);   
-    fprintf(stderr,"HASHSIZE=%lu\n",(long unsigned int)HASHSIZE);
-    index=new_hashtable(HASHSIZE);
+    fprintf(stderr,"DEFAULT_HASHSIZE=%lu\n",(long unsigned int)DEFAULT_HASHSIZE);
+    index=new_hashtable(DEFAULT_HASHSIZE);
     index_mem+=sizeof(hashtable);
     fprintf(stderr,"Scanning and indexing all reads from %s\n",fd1->filename);
     fastq_index_readnames(fd1,index,0,FALSE);
@@ -290,6 +302,13 @@ int main(int argc, char **argv ) {
   }
   
   if (num_reads1 == 0 ) {
+    if ( empty_ok ) {
+      fprintf(stdout,"Number of reads: %lu\n",0L);
+      fprintf(stdout,"Quality encoding range: %lu %lu\n",0L,0L);
+      fprintf(stdout,"Quality encoding: %s\n","");
+      fprintf(stdout,"Read length: %lu %lu %u\n",0L,0L,0);
+      exit(0);
+    }
     PRINT_ERROR("No reads found in %s.",argv[1+nopt]);
     exit(FASTQ_FORMAT_ERROR_EXIT_STATUS);
   }
@@ -354,14 +373,24 @@ int main(int argc, char **argv ) {
     fprintf(out,"Number of reads: %lu\n",num_reads1);
   }
 
-  fprintf(out,"Quality encoding range: %lu %lu\n",min_qual,max_qual);
   char *enc=fastq_qualRange2enc(min_qual,max_qual);
-  if ( enc == NULL ) {
-    PRINT_ERROR("Unable to determine quality encoding - unknown range [%lu,%lu]",min_qual,max_qual);
+  if ( enc == NULL && no_encoding_ok==FALSE ) {
+    if (max_qual>MAX_PHRED_QUAL) {
+      PRINT_ERROR("Unable to determine quality encoding - unknown range [%lu,>%u]",min_qual,MAX_PHRED_QUAL);
+    } else {
+      PRINT_ERROR("Unable to determine quality encoding - unknown range [%lu,%lu]",min_qual,max_qual);
+    }
+
     exit(FASTQ_FORMAT_ERROR_EXIT_STATUS);
   }
-  fprintf(out,"Quality encoding: %s\n",enc);
-  fprintf(out,"Read length: %lu %lu %u\n",min_rl,max_rl,median_rl(fd1,fd2));
+  fprintf(out,"Quality encoding range: %lu %lu\n",min_qual,max_qual);
+
+  if ( enc==NULL && no_encoding_ok ) {
+    fprintf(out,"Quality encoding: NA\n");
+  } else {
+    fprintf(out,"Quality encoding: %s\n",enc);
+  }
+  fprintf(out,"Read length: %lu %lu %u\n",min_rl-1,max_rl-1,median_rl(fd1,fd2)-1);
   fprintf(out,"OK\n"); 
   exit(0);
 }

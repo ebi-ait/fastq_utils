@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2012-2018,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2012-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 #
 # This is free software: you can redistribute it and/or modify
@@ -28,8 +28,8 @@
 #define __ptr_t         char *
 #endif /* C++ or ANSI C.  */           
 
-#ifndef unsignedlong
-#define unsignedlong unsigned long long
+#ifndef ulong
+#define ulong unsigned long long
 #endif
 
 #ifndef NULL
@@ -54,6 +54,9 @@ struct hashtable_s {
   hashnode* last_node;
 };
 
+#ifndef HASHSIZE
+#define HASHSIZE(t) t->size
+#endif
 //typedef hashnode **hashtable;
 typedef struct hashtable_s* hashtable;
 
@@ -65,9 +68,12 @@ __ptr_t delete(hashtable,unsignedlong,__ptr_t);
 __ptr_t get_object(hashtable,unsignedlong);
 int insere(hashtable,unsignedlong,__ptr_t);
 void free_hashtable(hashtable);
+void reset_hashtable(hashtable);
+
 
 void init_hash_traversal(hashtable table);
 __ptr_t next_hash_object(hashtable table);
 __ptr_t next_hashnode(hashtable table);
+//__ptr_t next_delete_hash_object(hashtable table);
 void hashtable_stats(hashtable table);
 #endif

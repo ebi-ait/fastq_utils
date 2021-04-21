@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2012-2018,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2012-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 # This file is part of fastq_utils.
 #
@@ -28,10 +28,11 @@
 
 #define BUCKET(table,i) table->buckets[i]
 #define LAST_ENTRY(table,i) table->buckets_last[i]
-#define HASHSIZE(table) table->size
-
-static unsignedlong mhash(hashtable,unsignedlong);
-static hashnode* hash_lookup(hashtable,unsignedlong);
+#ifndef HASHSIZE
+#define HASHSIZE(t) t->size
+#endif
+static ulong mhash(hashtable,ulong);
+static hashnode* hash_lookup(hashtable,ulong);
 
 
 static hashnode* hash_lookup(hashtable table,unsignedlong  key){
@@ -60,7 +61,7 @@ __ptr_t get_next_object(hashtable table,unsignedlong key)
 __ptr_t delete(hashtable table,unsignedlong key,__ptr_t obj)
 {
   hashnode *b,*prev=NULL;
-  unsignedlong c=mhash(table,key);
+  ulong c=mhash(table,key);
   b=BUCKET(table,c); /* set a pointer to the first bucket */
   while( b!=NULL) {
     if( b->value==key && b->obj==obj){
@@ -80,16 +81,15 @@ __ptr_t delete(hashtable table,unsignedlong key,__ptr_t obj)
   return NULL;
 }
 
-__ptr_t replace_object(hashtable table,unsignedlong  key,__ptr_t newobj)
-{
-  __ptr_t old;
-  hashnode *b=hash_lookup(table,key); 
-
-  if(b==NULL)return NULL;
-  old=b->obj;
-  b->obj=newobj;
-  return old;  
-}
+/* __ptr_t replace_object(hashtable table,ulong  key,__ptr_t newobj) */
+/* { */
+/*   __ptr_t old; */
+/*   hashnode *b=hash_lookup(table,key);  */
+/*   if(b==NULL)return NULL; */
+/*   old=b->obj; */
+/*   b->obj=newobj; */
+/*   return old;   */
+/* } */
 
 /* looks a 'bucket' in the hashing table whith 'key' and return the
  pointer to the object stored in that bucket or NULL if no bucket is found */ 
@@ -123,10 +123,10 @@ hashtable new_hashtable(unsignedlong hashsize) {
 }
 
 void hashtable_stats(hashtable table) {
-  unsignedlong zbuckets=0;
-  unsignedlong collisions=0;
-  unsignedlong max_col=0;
-  unsignedlong i,ctr;
+  ulong zbuckets=0;
+  ulong collisions=0;
+  ulong max_col=0;
+  ulong i,ctr;
   for(i=0;i<HASHSIZE(table);++i) {
     hashnode *b=BUCKET(table,i);
     if ( b==NULL ) ++zbuckets;
@@ -152,15 +152,15 @@ void hashtable_stats(hashtable table) {
 }
 
 /* A very simple hashing function */
-static unsignedlong mhash(hashtable table,unsignedlong key)
+static ulong mhash(hashtable table,ulong key)
 {
-  return (unsignedlong)(key%HASHSIZE(table));
+  return (ulong)(key%HASHSIZE(table));
 }
 
 /* inserts a new element in the hash table*/
 int insere(hashtable table,unsignedlong key,__ptr_t obj)
 {
-   unsignedlong ind;
+   ulong ind;
    hashnode *new;
    if((new=(hashnode *)malloc(sizeof(hashnode)))==NULL) return -1;
    ind=mhash(table,key);
@@ -185,7 +185,7 @@ int insere(hashtable table,unsignedlong key,__ptr_t obj)
 
 void free_hashtable(hashtable table)
 {
-   register unsignedlong i;
+   register ulong i;
    hashnode *n,*tmp;
    //fprintf(stderr,"free_hashtable\n");fflush(stderr);
    if (table==NULL) return;
@@ -200,6 +200,21 @@ void free_hashtable(hashtable table)
    free(table->buckets);
    free(table->buckets_last);
    free(table);
+}
+void reset_hashtable(hashtable table)
+{
+   register ulong i;
+   hashnode *n,*tmp;
+   //fprintf(stderr,"free_hashtable\n");fflush(stderr);
+   if (table==NULL) return;
+   for(i=0;i<HASHSIZE(table);++i) {
+      n=BUCKET(table,i);
+      while(n!=NULL) {
+         tmp=n;
+         n=n->next;
+         free(tmp);
+      }      
+   }
 }
 /*********************************************************************************/
 /*
@@ -261,5 +276,39 @@ __ptr_t next_hashnode(hashtable table)
   if (table->last_node==NULL) return next_hashnode(table);
   return table->last_node;
 }
+/*
+ * Returns all objects stored in a basket by making successive calls
+ * the returned objects are deleted from the hash table
+ */
+/* __ptr_t next_delete_hash_object(hashtable table) */
+/* { */
+/*   // first time.... */
+/*   if( table->last_bucket>=HASHSIZE(table))  */
+/*     return NULL; */
+    
+/*   if( table->last_node==NULL ) { */
+/*     // find bucket */
+/*     // find next bucket */
+/*     while ( table->last_node == NULL && table->last_bucket+1<HASHSIZE(table)) { */
+/*       ++table->last_bucket; */
+/*       table->last_node = BUCKET(table,table->last_bucket); */
+/*     } */
+/*     if (table->last_node==NULL) */
+/*       return NULL; */
+/*     // delete */
+/*     void *obj=table->last_node->obj; */
+/*     free(table->last_node); */
+/*     table->last_node=NULL; */
+/*     return obj; */
+/*   }  */
+/*   // Next in bucket */
+/*   table->last_node=table->last_node->next; */
+/*   if (table->last_node==NULL) return next_hash_object(table); */
+/*   void *obj=table->last_node->obj; */
+/*   free(table->last_node); */
+/*   table->last_node=NULL; */
+/*   return obj; */
+/* } */
+
 
 

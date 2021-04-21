@@ -1,6 +1,6 @@
 /*
 # =========================================================
-# Copyright 2012-2018,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
+# Copyright 2012-2020,  Nuno A. Fonseca (nuno dot fonseca at gmail dot com)
 #
 # This file is part of fastq_utils.
 #
@@ -36,7 +36,7 @@
 
 // public
 unsigned long index_mem=0;
-char* encodings[]={"33","64","solexa","33 *"};
+char* encodings[]={"33","64","solexa","33 *","sanger"};
 
 #define READ_LINE(fd) gzgets(fd,&read_buffer[0],MAX_READ_LENGTH)
 
@@ -171,7 +171,7 @@ FASTQ_FILE* fastq_new(const char* filename, const int fix_dot,const char *mode) 
   new->max_rl=0L;
   new->last_rl=0L;
   new->min_rl=MAX_READ_LENGTH;
-  new->min_qual=126;
+  new->min_qual=MAX_PHRED_QUAL;
   new->max_qual=0;
   new->num_rds=0;
   new->fix_dot=fix_dot;
@@ -271,10 +271,12 @@ void fastq_write_entry(FASTQ_FILE* fd,FASTQ_ENTRY *e) {
 }
 
 
-char* fastq_qualRange2enc(int min_qual,int max_qual) {
+char* fastq_qualRange2enc(unsigned int min_qual,unsigned int max_qual) {
   int enc=0;
-  if ( max_qual <=73 ) {
-    enc=0; //33
+  if ( min_qual>=33 && min_qual <59 && max_qual>=90 ) {
+    enc=4; // sanger: used by ONT and possibly by pacbio
+  } else if ( min_qual >=33 && max_qual <=73 ) {
+    enc=0; // 33
   } else if ( min_qual <59 ) {
     enc=0; // 33
   } else if ( min_qual >=64 && max_qual>74 ) {
@@ -282,11 +284,13 @@ char* fastq_qualRange2enc(int min_qual,int max_qual) {
   } else if (min_qual >=59 && max_qual>74 ) { // min_qual<64
     enc=2; // solexa
   } else {
-    enc=3; // 33 is the default value (* means that the default value was used
+    enc=3; // 33 is the default value (* means that the default value was used)
   }
+  if ( max_qual > MAX_PHRED_QUAL )
+    return(NULL);
   // raw reads should not have a value greater than min_qual+60
   // higher scores are possible in assemblies or read maps (http://en.wikipedia.org/wiki/FASTQ_format)
-  if ( max_qual > min_qual+60  ) {
+  if ( enc!=4 && max_qual > min_qual+60  ) {
     return(NULL);
   }
   return encodings[enc];
@@ -350,7 +354,7 @@ inline int fastq_validate_entry(FASTQ_FILE* fd,FASTQ_ENTRY *e) {
   // qual length==slen
   unsigned long qlen=0;
   while ( e->qual[qlen]!='\0' && e->qual[qlen]!='\n' && e->qual[qlen]!='\r') {
-    int x=(int)e->qual[qlen];
+    unsigned int x=(unsigned int)e->qual[qlen];
     if (x<fd->min_qual) { fd->min_qual=x; }
     if (x>fd->max_qual) { fd->max_qual=x; }
     qlen++;    
@@ -374,6 +378,7 @@ inline int fastq_validate_entry(FASTQ_FILE* fd,FASTQ_ENTRY *e) {
 // add option to replace dots
 void fastq_index_readnames(FASTQ_FILE* fd1,hashtable index,long long start_offset,int replace_dots) {
 
+  // replace dots not used anymore
   fd1->fix_dot=replace_dots;
   FASTQ_ENTRY *m1=fastq_new_entry();
   char rname[MAX_LABEL_LENGTH];
@@ -732,25 +737,25 @@ READ_SPACE is_color_space(char *seq,FASTQ_FILE* f) {
 }
 
 
-inline long replace_dot_by_N(char* seq) {
-  long n=0;  
-  long replaced=0;
-  while (seq[n]!='\0') {
-    if (seq[n]=='.') {
-      ++replaced;
-      seq[n]='N';
-    }
-    ++n;
-  }
-  return replaced;
-}
+/* inline long replace_dot_by_N(char* seq) { */
+/*   long n=0;   */
+/*   long replaced=0; */
+/*   while (seq[n]!='\0') { */
+/*     if (seq[n]=='.') { */
+/*       ++replaced; */
+/*       seq[n]='N'; */
+/*     } */
+/*     ++n; */
+/*   } */
+/*   return replaced; */
+/* } */
 
-inline long replace_dots(long long start,char* seq, char *hdr1, char *hdr2, char *qual,gzFile fd) {
-  // FIX .
-  long replaced=0;
-  //if ( fix_dot ) {
-    replaced+=replace_dot_by_N(seq);
-    gzprintf(fd,"%s%s%s%s",hdr1,seq,hdr2,qual);
-    //}
-  return(replaced);
-}
+/* inline long replace_dots(long long start,char* seq, char *hdr1, char *hdr2, char *qual,gzFile fd) { */
+/*   // FIX . */
+/*   long replaced=0; */
+/*   //if ( fix_dot ) { */
+/*     replaced+=replace_dot_by_N(seq); */
+/*     gzprintf(fd,"%s%s%s%s",hdr1,seq,hdr2,qual); */
+/*     //} */
+/*   return(replaced); */
+/* } */
